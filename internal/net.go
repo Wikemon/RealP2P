@@ -2,131 +2,271 @@
 package internal
 
 import (
-	"log"
+	"bufio"
+	"encoding/json"
+	"fmt"
 	"net"
+	"os"
+	"strings"
 	"sync"
 	"time"
 )
 
 const (
-	multicastAddr = "239.0.0.0:9999" // Адрес для multicast рассылки
-	responseAddr  = "239.0.0.1:9998" // Адрес для ответов
-	networkWait   = 2 * time.Second  // Время ожидания ответов
+	BroadcastPort = 9999
+	ChatPort      = 9998
+	BroadcastAddr = "255.255.255.255"
+	PingInterval  = 5 * time.Second
 )
 
-func GetLocalIP() (string, error) {
+type Peer struct {
+	IP   string
+	Port int
+}
+
+type Message struct {
+	Type    string // "ping", "pong", "chat"
+	From    Peer
+	Content string
+}
+
+var (
+	peers     = make(map[string]Peer)
+	peersLock sync.Mutex
+	localIP   string
+)
+
+func GetLocalIP() string {
 	conn, err := net.Dial("udp", "8.8.8.8:80")
 	if err != nil {
-		return "", err
+		fmt.Println("Error getting local IP:", err)
+		return "127.0.0.1"
 	}
 	defer conn.Close()
 
 	localAddr := conn.LocalAddr().(*net.UDPAddr)
-
-	return localAddr.IP.String(), nil
+	return localAddr.IP.String()
 }
 
-// Главная функция, запускающая sender и listener в отдельных горутинах
-func DiscoverPeers() ([]string, error) {
-	peersFound := make(chan string)
-	var peers []string
-	var wg sync.WaitGroup
+func StartBroadcastServer() {
+	addr, err := net.ResolveUDPAddr("udp", fmt.Sprintf(":%d", BroadcastPort))
+	if err != nil {
+		fmt.Println("Error resolving UDP address:", err)
+		return
+	}
 
-	// Запускаем горутины
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		if err := sendDiscoveryMessage(); err != nil {
-			log.Printf("Sender error: %v", err)
-		}
-	}()
+	conn, err := net.ListenUDP("udp", addr)
+	if err != nil {
+		fmt.Println("Error listening UDP:", err)
+		return
+	}
+	defer conn.Close()
 
-	go func() {
-		defer wg.Done()
-		if err := listenForPeers(peersFound); err != nil {
-			log.Printf("Listener error: %v", err)
-		}
-	}()
+	fmt.Println("Broadcast server started on port", BroadcastPort)
 
-	// Собираем результаты
-	go func() {
-		wg.Wait()
-		close(peersFound)
-	}()
-
-	// Собираем уникальные адреса
-	uniquePeers := make(map[string]struct{})
-	timer := time.NewTimer(networkWait)
-	defer timer.Stop()
-
+	buffer := make([]byte, 1024)
 	for {
-		select {
-		case peer, ok := <-peersFound:
-			if !ok {
-				return peers, nil
+		n, remoteAddr, err := conn.ReadFromUDP(buffer)
+		if err != nil {
+			fmt.Println("Error reading from UDP:", err)
+			continue
+		}
+
+		var msg Message
+		err = json.Unmarshal(buffer[:n], &msg)
+		if err != nil {
+			fmt.Println("Error decoding message:", err)
+			continue
+		}
+
+		// Игнорируем сообщения от себя
+		// if msg.From.IP == localIP {
+		// 	continue
+		// }
+
+		switch msg.Type {
+		case "ping":
+			// Отвечаем на ping сообщением pong
+			response := Message{
+				Type: "pong",
+				From: Peer{IP: localIP, Port: ChatPort},
 			}
-			if _, exists := uniquePeers[peer]; !exists {
-				uniquePeers[peer] = struct{}{}
-				peers = append(peers, peer)
+			data, _ := json.Marshal(response)
+			_, err = conn.WriteToUDP(data, remoteAddr)
+			if err != nil {
+				fmt.Println("Error sending pong:", err)
 			}
-		case <-timer.C:
-			return peers, nil
+
+		case "pong":
+			// Добавляем пир в список
+			addPeer(msg.From)
 		}
 	}
 }
 
-// Функция для отправки multicast сообщения в сеть
-func sendDiscoveryMessage() error {
-	addr, err := net.ResolveUDPAddr("udp", multicastAddr)
+func StartBroadcastClient() {
+	addr, err := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:%d", BroadcastAddr, BroadcastPort))
 	if err != nil {
-		return err
+		fmt.Println("Error resolving broadcast address:", err)
+		return
 	}
 
 	conn, err := net.DialUDP("udp", nil, addr)
 	if err != nil {
-		return err
+		fmt.Println("Error dialing UDP:", err)
+		return
 	}
 	defer conn.Close()
 
-	_, err = conn.Write([]byte("DISCOVER"))
-	return err
+	// Периодически отправляем ping сообщения
+	ticker := time.NewTicker(PingInterval)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		msg := Message{
+			Type: "ping",
+			From: Peer{IP: localIP, Port: ChatPort},
+		}
+		data, _ := json.Marshal(msg)
+		_, err := conn.Write(data)
+		if err != nil {
+			fmt.Println("Error sending ping:", err)
+		}
+	}
 }
 
-// Функция для прослушивания ответов от других пиров
-func listenForPeers(peers chan<- string) error {
-	addr, err := net.ResolveUDPAddr("udp", responseAddr)
+func StartChatServer() {
+	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", ChatPort))
 	if err != nil {
-		return err
+		fmt.Println("Error starting chat server:", err)
+		return
+	}
+	defer listener.Close()
+
+	fmt.Println("Chat server started on port", ChatPort)
+
+	for {
+		conn, err := listener.Accept()
+		if err != nil {
+			fmt.Println("Error accepting connection:", err)
+			continue
+		}
+
+		go handleChatConnection(conn)
+	}
+}
+
+func handleChatConnection(conn net.Conn) {
+	defer conn.Close()
+
+	remoteAddr := conn.RemoteAddr().(*net.TCPAddr)
+	peer := Peer{IP: remoteAddr.IP.String(), Port: remoteAddr.Port}
+
+	var msg Message
+	decoder := json.NewDecoder(conn)
+	err := decoder.Decode(&msg)
+	if err != nil {
+		fmt.Println("Error decoding chat message:", err)
+		return
 	}
 
-	conn, err := net.ListenMulticastUDP("udp", nil, addr)
+	if msg.Type == "chat" {
+		fmt.Printf("\n[%s] %s\n> ", peer.IP, msg.Content)
+	}
+}
+
+func addPeer(peer Peer) {
+	peersLock.Lock()
+	defer peersLock.Unlock()
+
+	key := fmt.Sprintf("%s:%d", peer.IP, peer.Port)
+	if _, exists := peers[key]; !exists && peer.IP != localIP {
+		peers[key] = peer
+		fmt.Printf("Discovered new peer: %s\n", key)
+	}
+}
+
+func sendChatMessage(peer Peer, text string) {
+	conn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", peer.IP, peer.Port))
 	if err != nil {
-		return err
+		fmt.Println("Error connecting to peer:", err)
+		return
 	}
 	defer conn.Close()
 
-	conn.SetReadDeadline(time.Now().Add(networkWait))
+	msg := Message{
+		Type:    "chat",
+		From:    Peer{IP: localIP, Port: ChatPort},
+		Content: text,
+	}
 
-	buffer := make([]byte, 1024)
+	encoder := json.NewEncoder(conn)
+	err = encoder.Encode(msg)
+	if err != nil {
+		fmt.Println("Error sending chat message:", err)
+	}
+}
+
+func StartUserInterface() {
+	reader := bufio.NewReader(os.Stdin)
+
 	for {
-		n, src, err := conn.ReadFromUDP(buffer)
+		fmt.Print("> ")
+		input, err := reader.ReadString('\n')
 		if err != nil {
-			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-				return nil // Таймаут - не ошибка в нашем случае
-			}
-			return err
+			fmt.Println("Error reading input:", err)
+			continue
 		}
 
-		if string(buffer[:n]) == "DISCOVER" {
-			// Отправляем ответ
-			respConn, err := net.DialUDP("udp", nil, src)
-			if err != nil {
+		input = strings.TrimSpace(input)
+
+		// Специальные команды
+		if input == "/list" {
+			peersLock.Lock()
+			fmt.Println("\nConnected peers:")
+			for _, peer := range peers {
+				fmt.Printf("- %s:%d\n", peer.IP, peer.Port)
+			}
+			peersLock.Unlock()
+			continue
+		}
+
+		if strings.HasPrefix(input, "/send ") {
+			parts := strings.SplitN(input, " ", 3)
+			if len(parts) != 3 {
+				fmt.Println("Usage: /send <IP> <message>")
 				continue
 			}
-			respConn.Write([]byte("HERE"))
-			respConn.Close()
-		} else if string(buffer[:n]) == "HERE" {
-			peers <- src.IP.String()
+
+			ip := parts[1]
+			message := parts[2]
+
+			peersLock.Lock()
+			var foundPeer *Peer
+			for _, peer := range peers {
+				if peer.IP == ip {
+					foundPeer = &peer
+					break
+				}
+			}
+			peersLock.Unlock()
+
+			if foundPeer != nil {
+				sendChatMessage(*foundPeer, message)
+				fmt.Printf("Message sent to %s\n", ip)
+			} else {
+				fmt.Printf("Peer %s not found\n", ip)
+			}
+			continue
+		}
+
+		// Отправка сообщения всем пирам
+		if input != "" {
+			peersLock.Lock()
+			for _, peer := range peers {
+				go sendChatMessage(peer, input)
+			}
+			peersLock.Unlock()
 		}
 	}
 }
