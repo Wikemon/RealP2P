@@ -30,12 +30,6 @@ type Message struct {
 	Content string
 }
 
-var (
-	peers     = make(map[string]Peer)
-	peersLock sync.Mutex
-	localIP   string
-)
-
 func GetLocalIP() string {
 	conn, err := net.Dial("udp", "8.8.8.8:80")
 	if err != nil {
@@ -47,6 +41,12 @@ func GetLocalIP() string {
 	localAddr := conn.LocalAddr().(*net.UDPAddr)
 	return localAddr.IP.String()
 }
+
+var (
+	peers     = make(map[string]Peer)
+	peersLock sync.Mutex
+	localIP   = GetLocalIP()
+)
 
 func StartBroadcastServer() {
 	addr, err := net.ResolveUDPAddr("udp", fmt.Sprintf(":%d", BroadcastPort))
@@ -79,10 +79,9 @@ func StartBroadcastServer() {
 			continue
 		}
 
-		// Игнорируем сообщения от себя
-		// if msg.From.IP == localIP {
-		// 	continue
-		// }
+		if msg.From.IP == localIP {
+			continue
+		}
 
 		switch msg.Type {
 		case "ping":
