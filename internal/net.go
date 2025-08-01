@@ -79,6 +79,8 @@ func StartBroadcastServer() {
 			continue
 		}
 
+		fmt.Println(msg)
+
 		if msg.From.IP == localIP {
 			continue
 		}
@@ -95,10 +97,12 @@ func StartBroadcastServer() {
 			if err != nil {
 				fmt.Println("Error sending pong:", err)
 			}
+			fmt.Println("pong sended")
 
 		case "pong":
 			// Добавляем пир в список
 			addPeer(msg.From)
+			fmt.Println("PEER ADDED")
 		}
 	}
 }
