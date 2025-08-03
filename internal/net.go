@@ -97,11 +97,22 @@ func StartBroadcastServer() {
 				From: Peer{IP: localIP, Port: ChatPort},
 			}
 			data, _ := json.Marshal(response)
-			_, err = conn.WriteToUDP(data, clientAddr)
+			// _, err = conn.WriteToUDP(data, clientAddr)
+			// if err != nil {
+			// 	fmt.Println("Error sending pong:", err)
+			// }
+			conn, err := net.DialUDP("udp", nil, clientAddr)
+			if err != nil {
+				fmt.Println("Error dialing UDP:", err)
+				return
+			}
+			_, err = conn.Write(data)
 			if err != nil {
 				fmt.Println("Error sending pong:", err)
+			} else {
+				fmt.Println("pong sended")
+
 			}
-			fmt.Println("pong sended")
 
 		case "pong":
 			// Добавляем пир в список
