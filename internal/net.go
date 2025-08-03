@@ -71,7 +71,7 @@ func StartBroadcastServer() {
 	buffer := make([]byte, 1024)
 
 	for {
-		n, _, err := conn.ReadFromUDP(buffer)
+		n, clientAddr, err := conn.ReadFromUDP(buffer)
 		if n == 0 || err != nil {
 			fmt.Println("Read error:", err)
 			return
@@ -97,7 +97,7 @@ func StartBroadcastServer() {
 				From: Peer{IP: localIP, Port: ChatPort},
 			}
 			data, _ := json.Marshal(response)
-			_, err = conn.Write(data)
+			_, err = conn.WriteToUDP(data, clientAddr)
 			if err != nil {
 				fmt.Println("Error sending pong:", err)
 			}
