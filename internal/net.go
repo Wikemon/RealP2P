@@ -101,7 +101,7 @@ func StartBroadcastServer() {
 			if err != nil {
 				fmt.Println("Error sending pong:", err)
 			} else {
-				fmt.Println("pong sent to", clientAddr)
+				fmt.Println("pong send")
 			}
 
 		case "pong":
