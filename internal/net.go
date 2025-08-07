@@ -161,7 +161,7 @@ func handleChatConnection(conn net.Conn) {
 		if msg.Public {
 			fmt.Printf("\n[%s] %s\n> ", peer.IP, msg.Content)
 		} else {
-			fmt.Printf("\n[%s] %s\n (private) > ", peer.IP, msg.Content)
+			fmt.Printf("\n[%s] (private) %s\n> ", peer.IP, msg.Content)
 		}
 	}
 
@@ -230,7 +230,7 @@ func addPeer(peer Peer) {
 	peersLock.Lock()
 	defer peersLock.Unlock()
 
-	key := fmt.Sprintf("%s:%d", peer.IP, peer.Port)
+	key := fmt.Sprintf("%s", peer.IP)
 	if _, exists := peers[key]; !exists && peer.IP != localIP {
 		peers[key] = peer
 		fmt.Printf("Discovered new peer: %s\n", key)
@@ -239,7 +239,7 @@ func addPeer(peer Peer) {
 
 func StartUserInterface() {
 	reader := bufio.NewReader(os.Stdin)
-
+	time.Sleep(1 * time.Second)
 	for {
 		fmt.Print("> ")
 		input, err := reader.ReadString('\n')
@@ -282,7 +282,7 @@ func StartUserInterface() {
 			peersLock.Unlock()
 
 			if foundPeer != nil {
-				sendChatMessage(*foundPeer, message, true)
+				sendChatMessage(*foundPeer, message, false)
 				fmt.Printf("Message sent to %s\n", ip)
 			} else {
 				fmt.Printf("Peer %s not found\n", ip)
@@ -294,7 +294,7 @@ func StartUserInterface() {
 		if input != "" {
 			peersLock.Lock()
 			for _, peer := range peers {
-				go sendChatMessage(peer, input, false)
+				go sendChatMessage(peer, input, true)
 			}
 			peersLock.Unlock()
 		}

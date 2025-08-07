@@ -8,7 +8,6 @@ import (
 func main() {
 	// Получаем локальный IP
 	fmt.Printf("Starting P2P chat. Your IP: %s\n", internal.GetLocalIP())
-	fmt.Printf("BroadcastAddr: %s\n", internal.GetBroadcastAddr())
 
 	// Запускаем UDP-broadcast сервер для обнаружения пиров
 	go internal.StartUDPServer()
