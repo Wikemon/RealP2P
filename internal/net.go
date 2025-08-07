@@ -27,6 +27,7 @@ type Message struct {
 	Type    string // "ping", "pong", "chat"
 	From    Peer
 	Content string
+	Public  bool
 }
 
 func GetLocalIP() string {
@@ -121,7 +122,7 @@ func StartUDPServer() {
 
 func StartTCPServer() {
 	fmt.Println("TCP server started on port 9998")
-	listener, err := net.Listen("tcp", fmt.Sprintf(":9998"))
+	listener, err := net.Listen("tcp", ":9998")
 	if err != nil {
 		fmt.Println("Error starting chat server:", err)
 		return
@@ -157,7 +158,11 @@ func handleChatConnection(conn net.Conn) {
 	case "pong":
 		addPeer(msg.From)
 	case "chat":
-		fmt.Printf("\n[%s] %s\n> ", peer.IP, msg.Content)
+		if msg.Public {
+			fmt.Printf("\n[%s] %s\n> ", peer.IP, msg.Content)
+		} else {
+			fmt.Printf("\n[%s] %s\n (private) > ", peer.IP, msg.Content)
+		}
 	}
 
 }
@@ -194,7 +199,7 @@ func StartBroadcastClient() {
 	}
 }
 
-func sendChatMessage(peer Peer, text string) {
+func sendChatMessage(peer Peer, text string, public bool) {
 	conn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", peer.IP, peer.Port))
 	if err != nil {
 		fmt.Println("Error connecting to peer:", err)
@@ -206,6 +211,12 @@ func sendChatMessage(peer Peer, text string) {
 		Type:    "chat",
 		From:    Peer{IP: localIP, Port: ChatPort},
 		Content: text,
+	}
+
+	if public == true {
+		msg.Public = true
+	} else if public == false {
+		msg.Public = false
 	}
 
 	data, _ := json.Marshal(msg)
@@ -244,7 +255,7 @@ func StartUserInterface() {
 			peersLock.Lock()
 			fmt.Println("\nConnected peers:")
 			for _, peer := range peers {
-				fmt.Printf("- %s:%d\n", peer.IP, peer.Port)
+				fmt.Printf("- %s\n", peer.IP)
 			}
 			peersLock.Unlock()
 			continue
@@ -271,7 +282,7 @@ func StartUserInterface() {
 			peersLock.Unlock()
 
 			if foundPeer != nil {
-				sendChatMessage(*foundPeer, message)
+				sendChatMessage(*foundPeer, message, true)
 				fmt.Printf("Message sent to %s\n", ip)
 			} else {
 				fmt.Printf("Peer %s not found\n", ip)
@@ -283,7 +294,7 @@ func StartUserInterface() {
 		if input != "" {
 			peersLock.Lock()
 			for _, peer := range peers {
-				go sendChatMessage(peer, input)
+				go sendChatMessage(peer, input, false)
 			}
 			peersLock.Unlock()
 		}
