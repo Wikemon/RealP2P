@@ -13,8 +13,11 @@ func main() {
 	// Запускаем сервер для приема чат-сообщений
 	//go internal.StartChatServer()
 
-	// Запускаем broadcast сервер для обнаружения пиров
-	go internal.StartBroadcastServer()
+	// Запускаем UDP-broadcast сервер для обнаружения пиров
+	go internal.StartUDPServer()
+
+	// Запускаем TCP сервер для обнаружения пиров
+	go internal.StartTCPServer()
 
 	// Запускаем broadcast клиент для оповещения о себе
 	go internal.StartBroadcastClient()

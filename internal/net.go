@@ -4,6 +4,7 @@ package internal
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net"
 	"strings"
 	"sync"
@@ -52,7 +53,7 @@ var (
 	BroadcastAddr = GetBroadcastAddr()
 )
 
-func StartBroadcastServer() {
+func StartUDPServer() {
 	addr, err := net.ResolveUDPAddr("udp", fmt.Sprintf(":%d", BroadcastPort))
 	if err != nil {
 		fmt.Println("Error resolving UDP address:", err)
@@ -71,7 +72,7 @@ func StartBroadcastServer() {
 	buffer := make([]byte, 1024)
 
 	for {
-		n, clientAddr, err := conn.ReadFromUDP(buffer)
+		n, _, err := conn.ReadFromUDP(buffer)
 		if n == 0 || err != nil {
 			fmt.Println("Read error:", err)
 			continue
@@ -97,17 +98,57 @@ func StartBroadcastServer() {
 				From: Peer{IP: localIP, Port: ChatPort},
 			}
 			data, _ := json.Marshal(response)
-			_, err = conn.WriteToUDP(data, clientAddr)
+			conn1, err := net.Dial("tcp", fmt.Sprint(msg.From.IP, ":", msg.From.Port))
+			if err != nil {
+				fmt.Println(err)
+			}
+			conn1.Write(data)
+			conn1.Close()
 			if err != nil {
 				fmt.Println("Error sending pong:", err)
 			} else {
 				fmt.Println("pong send")
 			}
 
+			// case "pong":
+			// 	// Добавляем пир в список
+			// 	addPeer(msg.From)
+		}
+	}
+
+}
+
+func StartTCPServer() {
+	fmt.Println("TCP server started on port 8080")
+	ln, err := net.Listen("tcp", ":8080")
+	if err != nil {
+		fmt.Println(err)
+	}
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			log.Printf("TCP Accept error: %v", err)
+			continue
+		}
+		buffer := make([]byte, 1024)
+		n, err := conn.Read(buffer)
+		if n == 0 || err != nil {
+			fmt.Println("Read error:", err)
+			continue
+		}
+		var msg Message
+		err = json.Unmarshal(buffer[:n], &msg)
+		if err != nil {
+			fmt.Println("Error decoding message:", err)
+			continue
+		}
+
+		fmt.Println(msg)
+		switch msg.Type {
 		case "pong":
-			// Добавляем пир в список
 			addPeer(msg.From)
 		}
+		conn.Close()
 	}
 
 }
