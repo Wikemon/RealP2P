@@ -2,10 +2,11 @@
 package internal
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -84,7 +85,7 @@ func StartUDPServer() {
 			continue
 		}
 
-		fmt.Println(msg)
+		//fmt.Println(msg)
 
 		if msg.From.IP == localIP {
 			continue
@@ -107,7 +108,7 @@ func StartUDPServer() {
 			if err != nil {
 				fmt.Println("Error sending pong:", err)
 			} else {
-				fmt.Println("pong send")
+				//fmt.Println("pong send")
 			}
 
 			// case "pong":
@@ -120,35 +121,43 @@ func StartUDPServer() {
 
 func StartTCPServer() {
 	fmt.Println("TCP server started on port 9998")
-	ln, err := net.Listen("tcp", ":9998")
+	listener, err := net.Listen("tcp", fmt.Sprintf(":9998"))
 	if err != nil {
-		fmt.Println(err)
+		fmt.Println("Error starting chat server:", err)
+		return
 	}
+	defer listener.Close()
+
 	for {
-		conn, err := ln.Accept()
+		conn, err := listener.Accept()
 		if err != nil {
-			log.Printf("TCP Accept error: %v", err)
-			continue
-		}
-		buffer := make([]byte, 1024)
-		n, err := conn.Read(buffer)
-		if n == 0 || err != nil {
-			fmt.Println("Read error:", err)
-			continue
-		}
-		var msg Message
-		err = json.Unmarshal(buffer[:n], &msg)
-		if err != nil {
-			fmt.Println("Error decoding message:", err)
+			fmt.Println("Error accepting connection:", err)
 			continue
 		}
 
-		fmt.Println(msg)
-		switch msg.Type {
-		case "pong":
-			addPeer(msg.From)
-		}
-		conn.Close()
+		go handleChatConnection(conn)
+	}
+}
+
+func handleChatConnection(conn net.Conn) {
+	defer conn.Close()
+
+	remoteAddr := conn.RemoteAddr().(*net.TCPAddr)
+	peer := Peer{IP: remoteAddr.IP.String(), Port: remoteAddr.Port}
+
+	var msg Message
+	decoder := json.NewDecoder(conn)
+	err := decoder.Decode(&msg)
+	if err != nil {
+		fmt.Println("Error decoding chat message:", err)
+		return
+	}
+
+	switch msg.Type {
+	case "pong":
+		addPeer(msg.From)
+	case "chat":
+		fmt.Printf("\n[%s] %s\n> ", peer.IP, msg.Content)
 	}
 
 }
@@ -181,49 +190,30 @@ func StartBroadcastClient() {
 		if err != nil {
 			fmt.Println("Error sending ping:", err)
 		}
-		fmt.Println("ping sended")
+		//fmt.Println("ping sended")
 	}
 }
 
-// func StartChatServer() {
-// 	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", ChatPort))
-// 	if err != nil {
-// 		fmt.Println("Error starting chat server:", err)
-// 		return
-// 	}
-// 	defer listener.Close()
+func sendChatMessage(peer Peer, text string) {
+	conn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", peer.IP, peer.Port))
+	if err != nil {
+		fmt.Println("Error connecting to peer:", err)
+		return
+	}
+	defer conn.Close()
 
-// 	fmt.Println("Chat server started on port", ChatPort)
+	msg := Message{
+		Type:    "chat",
+		From:    Peer{IP: localIP, Port: ChatPort},
+		Content: text,
+	}
 
-// 	for {
-// 		conn, err := listener.Accept()
-// 		if err != nil {
-// 			fmt.Println("Error accepting connection:", err)
-// 			continue
-// 		}
-
-// 		go handleChatConnection(conn)
-// 	}
-// }
-
-// func handleChatConnection(conn net.Conn) {
-// 	defer conn.Close()
-
-// 	remoteAddr := conn.RemoteAddr().(*net.TCPAddr)
-// 	peer := Peer{IP: remoteAddr.IP.String(), Port: remoteAddr.Port}
-
-// 	var msg Message
-// 	decoder := json.NewDecoder(conn)
-// 	err := decoder.Decode(&msg)
-// 	if err != nil {
-// 		fmt.Println("Error decoding chat message:", err)
-// 		return
-// 	}
-
-// 	if msg.Type == "chat" {
-// 		fmt.Printf("\n[%s] %s\n> ", peer.IP, msg.Content)
-// 	}
-// }
+	data, _ := json.Marshal(msg)
+	_, err = conn.Write(data)
+	if err != nil {
+		fmt.Println("Error sending message:", err)
+	}
+}
 
 func addPeer(peer Peer) {
 	peersLock.Lock()
@@ -236,87 +226,66 @@ func addPeer(peer Peer) {
 	}
 }
 
-// func sendChatMessage(peer Peer, text string) {
-// 	conn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", peer.IP, peer.Port))
-// 	if err != nil {
-// 		fmt.Println("Error connecting to peer:", err)
-// 		return
-// 	}
-// 	defer conn.Close()
+func StartUserInterface() {
+	reader := bufio.NewReader(os.Stdin)
 
-// 	msg := Message{
-// 		Type:    "chat",
-// 		From:    Peer{IP: localIP, Port: ChatPort},
-// 		Content: text,
-// 	}
+	for {
+		fmt.Print("> ")
+		input, err := reader.ReadString('\n')
+		if err != nil {
+			fmt.Println("Error reading input:", err)
+			continue
+		}
 
-// 	encoder := json.NewEncoder(conn)
-// 	err = encoder.Encode(msg)
-// 	if err != nil {
-// 		fmt.Println("Error sending chat message:", err)
-// 	}
-// }
+		input = strings.TrimSpace(input)
 
-// func StartUserInterface() {
-// 	reader := bufio.NewReader(os.Stdin)
+		// Специальные команды
+		if input == "/list" {
+			peersLock.Lock()
+			fmt.Println("\nConnected peers:")
+			for _, peer := range peers {
+				fmt.Printf("- %s:%d\n", peer.IP, peer.Port)
+			}
+			peersLock.Unlock()
+			continue
+		}
 
-// 	for {
-// 		fmt.Print("> ")
-// 		input, err := reader.ReadString('\n')
-// 		if err != nil {
-// 			fmt.Println("Error reading input:", err)
-// 			continue
-// 		}
+		if strings.HasPrefix(input, "/send") {
+			parts := strings.SplitN(input, " ", 3)
+			if len(parts) != 3 {
+				fmt.Println("Usage: /send <IP> <message>")
+				continue
+			}
 
-// 		input = strings.TrimSpace(input)
+			ip := parts[1]
+			message := parts[2]
 
-// 		// Специальные команды
-// 		if input == "/list" {
-// 			peersLock.Lock()
-// 			fmt.Println("\nConnected peers:")
-// 			for _, peer := range peers {
-// 				fmt.Printf("- %s:%d\n", peer.IP, peer.Port)
-// 			}
-// 			peersLock.Unlock()
-// 			continue
-// 		}
+			peersLock.Lock()
+			var foundPeer *Peer
+			for _, peer := range peers {
+				if peer.IP == ip {
+					foundPeer = &peer
+					break
+				}
+			}
+			peersLock.Unlock()
 
-// 		if strings.HasPrefix(input, "/send ") {
-// 			parts := strings.SplitN(input, " ", 3)
-// 			if len(parts) != 3 {
-// 				fmt.Println("Usage: /send <IP> <message>")
-// 				continue
-// 			}
+			if foundPeer != nil {
+				sendChatMessage(*foundPeer, message)
+				fmt.Printf("Message sent to %s\n", ip)
+			} else {
+				fmt.Printf("Peer %s not found\n", ip)
+			}
+			continue
+		}
 
-// 			ip := parts[1]
-// 			message := parts[2]
-
-// 			peersLock.Lock()
-// 			var foundPeer *Peer
-// 			for _, peer := range peers {
-// 				if peer.IP == ip {
-// 					foundPeer = &peer
-// 					break
-// 				}
-// 			}
-// 			peersLock.Unlock()
-
-// 			if foundPeer != nil {
-// 				sendChatMessage(*foundPeer, message)
-// 				fmt.Printf("Message sent to %s\n", ip)
-// 			} else {
-// 				fmt.Printf("Peer %s not found\n", ip)
-// 			}
-// 			continue
-// 		}
-
-// 		// Отправка сообщения всем пирам
-// 		if input != "" {
-// 			peersLock.Lock()
-// 			for _, peer := range peers {
-// 				go sendChatMessage(peer, input)
-// 			}
-// 			peersLock.Unlock()
-// 		}
-// 	}
-// }
+		// Отправка сообщения всем пирам
+		if input != "" {
+			peersLock.Lock()
+			for _, peer := range peers {
+				go sendChatMessage(peer, input)
+			}
+			peersLock.Unlock()
+		}
+	}
+}
