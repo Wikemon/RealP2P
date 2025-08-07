@@ -119,8 +119,8 @@ func StartUDPServer() {
 }
 
 func StartTCPServer() {
-	fmt.Println("TCP server started on port 8080")
-	ln, err := net.Listen("tcp", ":8080")
+	fmt.Println("TCP server started on port 9998")
+	ln, err := net.Listen("tcp", ":9998")
 	if err != nil {
 		fmt.Println(err)
 	}
