@@ -19,6 +19,7 @@ func main() {
 	go internal.StartBroadcastClient()
 
 	fmt.Println("hello world")
+	fmt.Println("hello git")
 
 	internal.StartUserInterface()
 }
