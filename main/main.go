@@ -18,8 +18,5 @@ func main() {
 	// Запускаем broadcast клиент для оповещения о себе
 	go internal.StartBroadcastClient()
 
-	fmt.Println("hello world")
-	fmt.Println("hello git")
-
 	internal.StartUserInterface()
 }
